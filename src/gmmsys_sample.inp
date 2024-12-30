@@ -25,42 +25,29 @@ matrices initcoeff = defarray({d0,d1,d2,d3}', {s0,s1,s2}')
 
 # main user input
 bundle Options = _(initcoeff = initcoeff)
-list Endog = gq gq	# TODO: Do we need to repeat the endogenous?
+list Endog = gq gq	    # TODO: Do we need to repeat the endogenous?
 list Ld = const gp gy gpop
 list Ls = const gp gpf
 lists Regressors = defarray(Ld, Ls)
 list Instruments = const gy gpf gpop
 
 bundle Model = gmmsys(Endog, Regressors, Instruments, Options)
-#print Model
+# print Model
 
+
+#==================
+# Comparison with 3SLS -- Sven's example
+#==================
+list Endog = gq gq	    # TODO: Do we need to repeat the endogenous?
+list Ld = const gp gy gpop
+list Ls = const gp gpf
+lists Regressors = defarray(Ld, Ls)
 
 syscompare <- system
     equations Endog Regressors
-    endog gq gp
+    endog gq gp    # only needed, if Endog incl. the same variable twice
     instr Instruments
 end system
 
 estimate syscompare method=3sls --iterate
-
-# TODO: Check:
-# 1) correlation between residuals is much lower for 3SLS
-#    -> check computation of correlation and or uhats
-# 2) log determinant of vcv is also different
-#    -> probably related issue
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
