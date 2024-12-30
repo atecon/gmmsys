@@ -14,10 +14,12 @@ function bundle gmmsys (const list Endog "Endogenous series",
         self.initcoeff = get_initcoeff() # TODO: run equ-by-equ. OLS
     endif
 
+    errorif(nelem(Endog) != nelem(Regressors), "Number of equations and regressors must match")
+
     # Preparations
     strings self.depvars = varnames(Endog)
     strings self.instrument_names = varnames(Instruments)
-    add_regressor_names(Endog, Regressors, &self)
+    add_regressor_names(Regressors, &self)
     matrix coeff = flatten(self.initcoeff, TRUE)
 
     # Estimation part
@@ -92,6 +94,8 @@ end function
 
 
 function void gmmsys_print (const bundle self)
+    /* Print results. */
+
     start = 1
 
     printf "\n\nFunction evaluations: %d\n", self.Model.fncount
@@ -99,15 +103,18 @@ function void gmmsys_print (const bundle self)
     printf "Tolerance: %g\n\n", self.Model.tol
 
     loop foreach i self.depvars
-        string s = sprintf("parnames_%s", "$i")
+        string s = sprintf("parnames_eq_%d", i)
         strings depvars = self[s]
         scalar k = nelem(depvars)
         ende = start - 1 + k
         matrix bhat = self.Model.coeff[start:ende] ~ self.Model.stderr[start:ende]
         start += k
-        depvars += defarray("Mean dependent var", "S.D. dependent var",
-          "Sum squared resid", "S.E. of regression",
-          "R-squared")
+
+        # Add model statistics
+        strings rowlabels = depvars
+        rowlabels += defarray("Mean dependent var", "S.D. dependent var",
+                              "Sum squared resid", "S.E. of regression",
+                              "R-squared")
         matrix addstats = self.mean_sd_depvars[i,] ~ self.ess[i] ~ \
           self.std_uhat[i] ~ self.rsq[i]
 
@@ -117,7 +124,7 @@ function void gmmsys_print (const bundle self)
         printf "Dependent variable: %s\n", "$i"
         printf "Instruments: %s\n\n", flatten(self.instrument_names, " ")
 
-        modprint bhat depvars addstats
+        modprint bhat rowlabels addstats
     endloop
 
     printf "\nGMM criterion: Q = %g (TQ = %.5f)\n", self.Model.gmmcrit, (self.Model.gmmcrit * self.Model.T)
@@ -247,12 +254,12 @@ function matrix get_mean_and_sd (const list Endog)
 end function
 
 
-function void add_regressor_names (const list Endog, const lists Instruments, bundle *self)
+function void add_regressor_names (const lists Regressors, bundle *self)
     /* Create string array holding the equations-specific names of regressors. */
 
-    loop foreach i Endog
-        string s = sprintf("parnames_%s", "$i")
-        strings self[s] = varnames(Instruments[i])
+    loop foreach i Regressors
+        string s = sprintf("parnames_eq_%d", i)
+        strings self[s] = varnames(Regressors[i])
     endloop
 end function
 
