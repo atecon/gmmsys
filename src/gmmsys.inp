@@ -1,0 +1,260 @@
+function bundle gmmsys (const list Endog "Endogenous series",
+                        const lists Regressors "Eq.-specific regressors",
+                        const list Instruments "Instruments",
+                        bundle self[null] "Options")
+    /* */
+
+    matrix W = I(nelem(Endog) * nelem(Instruments)) # TODO: may be passed via self
+
+    if !exists(self)
+        bundle self
+    endif
+
+    if !inbundle(self, "initcoeff")
+        self.initcoeff = get_initcoeff() # TODO: run equ-by-equ. OLS
+    endif
+
+    # Preparations
+    strings self.depvars = varnames(Endog)
+    strings self.instrument_names = varnames(Instruments)
+    add_regressor_names(Endog, Regressors, &self)
+    matrix coeff = flatten(self.initcoeff, TRUE)
+
+    # Estimation part
+    list Residuals = update_residuals(Endog, Regressors, coeff)
+    bundle self.Model = estimate_sysgmm(coeff, W, Residuals, Endog, Regressors, Instruments)
+
+    # Post-estimation
+    list self.uhats = get_uhats(self, Endog, Regressors)
+    list self.yhats = get_yhats(Endog, self.uhats)
+    matrix self.mean_sd_depvars = get_mean_and_sd(Endog)
+    matrix self.ess = get_ess(self.uhats)
+    matrix self.std_uhat = get_std_uhat(self.uhats)
+    matrix self.corr_uhat = get_uhat_corr(self.uhats)
+    scalar self.ldet_uhat = ldet(mcov({self.uhats}))
+    matrix self.rsq = get_rsq(Endog, self.yhats)
+
+    gmmsys_print(self)
+
+    return self
+end function
+
+
+function list update_residuals (const list Endog,
+                                const lists Regressors,
+                                const matrix coeff)
+    # see the explanations in the gmm block
+
+    list Residuals = deflist()
+    start = 1
+
+    loop i=1..nelem(Endog)
+        k = nelem(Regressors[i])	# num of regressors in equ. i
+        ende = start - 1 + k
+
+        Residuals += genseries("resid_$i",
+                               Endog[i] - lincomb(Regressors[i],
+                               coeff[start:ende]))
+        start += k                  # move on to the next coeff segment
+    endloop
+
+    return Residuals
+end function
+
+
+function bundle estimate_sysgmm (matrix coeff,
+                                 const matrix W,
+                                 list Residuals,
+                                 const list Endog,
+                                 lists Regressors,
+                                 list Instruments)
+    # - Endog N-element list, dep. var. in each equ.
+    # - sysRHS N-array of lists of arbitrary length K_i each (i=1..N), regressors
+    #   in each equ. (typically a variable will appear in more than one equation)
+    #
+    # - coeff is vector with all coefficients in the system, so:
+    #   \sum_{i=1}^N K_i, where K_i is the number of regressors (with free coefficients)
+    #	in the i_th equation
+    # - We use a vector instead of a matrix because of gretl limitations <=2023c.
+    # - Because a loop isn't directly allowed in a gmm block, we use a helper function.
+
+    gmm
+        Residuals = update_residuals(Endog, Regressors, coeff)
+        orthog Residuals ; Instruments
+        weights W
+        params coeff	# after gmm is finished, coeff should be transformed to an array or so.
+    end gmm --iterate --quiet
+
+    bundle Model = $model
+
+    return Model
+end function
+
+
+function void gmmsys_print (const bundle self)
+    start = 1
+
+    printf "\n\nFunction evaluations: %d\n", self.Model.fncount
+    printf "Evaluations of gradient: %d\n", self.Model.grcount
+    printf "Tolerance: %g\n\n", self.Model.tol
+
+    loop foreach i self.depvars
+        string s = sprintf("parnames_%s", "$i")
+        strings depvars = self[s]
+        scalar k = nelem(depvars)
+        ende = start - 1 + k
+        matrix bhat = self.Model.coeff[start:ende] ~ self.Model.stderr[start:ende]
+        start += k
+        depvars += defarray("Mean dependent var", "S.D. dependent var",
+          "Sum squared resid", "S.E. of regression",
+          "R-squared")
+        matrix addstats = self.mean_sd_depvars[i,] ~ self.ess[i] ~ \
+          self.std_uhat[i] ~ self.rsq[i]
+
+        printf "\nEquation %d: Iterated GMM, using observations %s-%s (T = %d)\n",
+          i, obslabel(self.Model.t1), obslabel(self.Model.t2), self.Model.T
+        #HAC standard errors, bandwidth 2, Bartlett kernel  # TODO
+        printf "Dependent variable: %s\n", "$i"
+        printf "Instruments: %s\n\n", flatten(self.instrument_names, " ")
+
+        modprint bhat depvars addstats
+    endloop
+
+    printf "\nGMM criterion: Q = %g (TQ = %.5f)\n", self.Model.gmmcrit, (self.Model.gmmcrit * self.Model.T)
+    printf "J test: Chi-square(%d) = %g [%.4f]\n\n",
+      self.Model.J_df, self.Model.J_test, pvalue(X, self.Model.J_df, self.Model.J_test)
+    printf "Cross-equation correlation between residuals\n"
+    printf "%12.4f\n\n", self.corr_uhat
+    printf "log determinant = %.5f\n\n", self.ldet_uhat
+end function
+
+
+function list get_yhats (const list Endog, const list uhats)
+    /* Compute fitted values for each equation. */
+
+    list yhats
+
+    loop foreach i Endog
+        yhats += genseries(sprintf("yhat_%d", i), Endog[i] - uhats[i])
+    endloop
+
+    return yhats
+end function
+
+
+
+function list get_uhats (const bundle self, const list Endog, const lists Regressors)
+    /* Compute residuals for each equation. */
+
+    start = 1
+    list Uhats
+
+    loop foreach i Endog
+        list xlist = Regressors[i]
+        scalar k = nelem(xlist)
+        matrix ende = start - 1 + k
+        matrix bhat = self.Model.coeff[start:ende]
+        start += k
+
+        Uhats += genseries(sprintf("uhat_%d", i), Endog.$i - lincomb(xlist, bhat))
+    endloop
+
+    return Uhats
+end function
+
+
+function strings get_equation_labels (const int N)
+    /* Create labels for equations. */
+
+    strings lab = array(N)
+
+    loop i=1..N
+        lab[i] = sprintf("Equation %d", i)
+    endloop
+
+    return lab
+end function
+
+
+function matrix get_rsq (const list Endog, const list yhats)
+    /* Compute squared correlation coefficients. */
+
+    matrix rsq = mshape(NA, nelem(Endog), 1)
+
+    loop foreach i Endog
+        rsq[i] = corr(Endog[i], yhats[i])^2
+    endloop
+    rnameset(rsq, get_equation_labels(nelem(Endog)))
+    cnameset(rsq, "R-squared")
+
+    return rsq
+end function
+
+
+function matrix get_uhat_corr (const list uhats)
+    /* Compute correlation between residuals. */
+
+    matrix ret = mcorr({uhats})
+    rnameset(ret, varnames(uhats))
+    cnameset(ret, varnames(uhats))
+
+    return ret
+end function
+
+
+
+function matrix get_std_uhat (const list uhats)
+    /* Compute std. error of residuals. */
+
+    matrix ret = vec(sdc({uhats}))
+    rnameset(ret, varnames(uhats))
+    cnameset(ret, defarray("sd uhat"))
+
+    return ret
+end function
+
+function matrix get_ess (const list uhats)
+    /* Compute residuals sum of squares. */
+
+    matrix ess = mshape(NA, nelem(uhats), 1)
+
+    loop foreach i uhats
+        ess[i,] = sst(uhats.$i)
+    endloop
+
+    cnameset(ess, "ess")
+    rnameset(ess, get_equation_labels(nelem(uhats)))
+
+    return ess
+end function
+
+
+function matrix get_mean_and_sd (const list Endog)
+    /* Needed for model printout. */
+
+    matrix stats = mshape(NA, nelem(Endog), 2)
+
+    loop foreach i Endog
+        stats[i,] = mean(Endog.$i) ~ sd(Endog.$i)
+    endloop
+
+    # Won't work as the name of the dep. var. may be the same in each equation
+    #rnameset(stats, varnames(Endog))
+    rnameset(stats, get_equation_labels(nelem(Endog)))
+    cnameset(stats, "mean sd")
+
+    return stats
+end function
+
+
+function void add_regressor_names (const list Endog, const lists Instruments, bundle *self)
+    /* Create string array holding the equations-specific names of regressors. */
+
+    loop foreach i Endog
+        string s = sprintf("parnames_%s", "$i")
+        strings self[s] = varnames(Instruments[i])
+    endloop
+end function
+
+
+

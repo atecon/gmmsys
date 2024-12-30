@@ -1,0 +1,66 @@
+set verbose off
+include gmmsys.inp --force
+
+open broiler.gdt --quiet
+
+#====================
+# Setup by the user
+#====================
+gq = 100 * ldiff(Q)
+gp = 100 * ldiff(PCHICK)
+gy = 100 * ldiff(Y)
+gpop = 100 * ldiff(POP)
+gpf = 100 * ldiff(PF)
+
+smpl gq gp gy gpf gpop --no-missing # gmm doesn't allow NAs, right?
+
+d0 = mean(gq)
+d1 = -0.5
+d2 = 0.1
+d3 = 0
+s0 = 0
+s1 = 0.1
+s2 = -0.5
+matrices initcoeff = defarray({d0,d1,d2,d3}', {s0,s1,s2}')
+
+# main user input
+bundle Options = _(initcoeff = initcoeff)
+list Endog = gq gq	# TODO: Do we need to repeat the endogenous?
+list Ld = const gp gy gpop
+list Ls = const gp gpf
+lists Regressors = defarray(Ld, Ls)
+list Instruments = const gy gpf gpop
+
+bundle Model = gmmsys(Endog, Regressors, Instruments, Options)
+#print Model
+
+
+syscompare <- system
+    equations Endog Regressors
+    endog gq gp
+    instr Instruments
+end system
+
+estimate syscompare method=3sls --iterate
+
+# TODO: Check:
+# 1) correlation between residuals is much lower for 3SLS
+#    -> check computation of correlation and or uhats
+# 2) log determinant of vcv is also different
+#    -> probably related issue
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

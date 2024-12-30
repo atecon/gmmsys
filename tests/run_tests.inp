@@ -1,0 +1,13 @@
+set verbose off
+set assert stop
+clear
+
+include assertion.gfn
+include ./src/gmmsys.inp
+
+
+
+
+
+
+printf "\nInfo: All tests passed.\n"
