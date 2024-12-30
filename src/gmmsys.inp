@@ -2,7 +2,7 @@ function bundle gmmsys (const list Endog "Endogenous series",
                         const lists Regressors "Eq.-specific regressors",
                         const list Instruments "Instruments",
                         bundle self[null] "Options")
-    /* */
+    /* Main public function for estimating a system of equations using GMM. */
 
     matrix W = I(nelem(Endog) * nelem(Instruments)) # TODO: may be passed via self
 
@@ -45,7 +45,7 @@ end function
 function list update_residuals (const list Endog,
                                 const lists Regressors,
                                 const matrix coeff)
-    # see the explanations in the gmm block
+    /* Update residuals for each equation. */
 
     list Residuals = deflist()
     start = 1
@@ -57,7 +57,7 @@ function list update_residuals (const list Endog,
         Residuals += genseries("resid_$i",
                                Endog[i] - lincomb(Regressors[i],
                                coeff[start:ende]))
-        start += k                  # move on to the next coeff segment
+        start += k
     endloop
 
     return Residuals
@@ -84,7 +84,7 @@ function bundle estimate_sysgmm (matrix coeff,
         Residuals = update_residuals(Endog, Regressors, coeff)
         orthog Residuals ; Instruments
         weights W
-        params coeff	# after gmm is finished, coeff should be transformed to an array or so.
+        params coeff
     end gmm --iterate --quiet
 
     bundle Model = $model
@@ -120,7 +120,7 @@ function void gmmsys_print (const bundle self)
 
         printf "\nEquation %d: Iterated GMM, using observations %s-%s (T = %d)\n",
           i, obslabel(self.Model.t1), obslabel(self.Model.t2), self.Model.T
-        #HAC standard errors, bandwidth 2, Bartlett kernel  # TODO
+        # TODO: Print information on "HAC standard errors, bandwidth 2, Bartlett kernel"
         printf "Dependent variable: %s\n", "$i"
         printf "Instruments: %s\n\n", flatten(self.instrument_names, " ")
 
