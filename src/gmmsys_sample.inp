@@ -31,7 +31,8 @@ list Ls = const gp gpf
 lists Regressors = defarray(Ld, Ls)
 list Instruments = const gy gpf gpop
 
-bundle Model = gmmsys(Endog, Regressors, Instruments, Options)
+# Include "Options" in the model to pass the initial coefficients by hand
+bundle Model = gmmsys(Endog, Regressors, Instruments) #, Options)
 # print Model
 
 

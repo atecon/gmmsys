@@ -11,7 +11,9 @@ function bundle gmmsys (const list Endog "Endogenous series",
     endif
 
     if !inbundle(self, "initcoeff")
-        self.initcoeff = get_initcoeff() # TODO: run equ-by-equ. OLS
+        print "Compute initial coefficients using OLS (equ-by-equ.)"
+        flush
+        self.initcoeff = compute_initial_coefficients(Endog, Regressors)
     endif
 
     errorif(nelem(Endog) != nelem(Regressors), "Number of equations and regressors must match")
@@ -39,6 +41,21 @@ function bundle gmmsys (const list Endog "Endogenous series",
     gmmsys_print(self)
 
     return self
+end function
+
+
+function matrices compute_initial_coefficients (const list Endog,
+                                                const lists Regressors)
+    /* Compute initial coefficients using OLS. */
+
+    matrices initcoeff = array(nelem(Endog))
+
+    loop foreach i Endog
+        ols Endog.$i Regressors[i] --quiet
+        matrix initcoeff[i] = $coeff
+    endloop
+
+    return initcoeff
 end function
 
 
